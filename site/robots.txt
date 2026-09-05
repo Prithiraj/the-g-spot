@@ -1,0 +1,4 @@
+# Independent design preview. Keep meta noindex in place until owner sign-off.
+# A robots.txt at /the-g-spot/ does not control the host root; the HTML robots meta is authoritative here.
+User-agent: *
+Allow: /

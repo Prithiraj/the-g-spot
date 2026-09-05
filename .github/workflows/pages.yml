@@ -1,0 +1,86 @@
+name: Build, verify and publish preview
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - 'scripts/research-assets.py'
+      - '.github/workflows/research-assets.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: g-spot-preview
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: write
+      pages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install build and test tools
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m playwright install --with-deps chromium
+          mkdir -p .cache
+          curl --fail --location --retry 3 https://unpkg.com/axe-core@4.10.3/axe.min.js -o .cache/axe.min.js
+      - name: Build optimized static preview
+        run: python scripts/build.py
+      - name: Browser, accessibility and release-gate checks
+        run: python scripts/test-site.py
+      - name: Preserve QA and built site
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-and-verification
+          path: |
+            dist/
+            qa/
+            site/
+            scripts/
+            content/
+            docs/
+            requirements-dev.txt
+          retention-days: 7
+      - name: Prepare deployment branch
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # A dedicated release branch keeps build output separate from source.
+          # Initial gh-pages activation is performed by a repository administrator.
+          cp -R qa dist/verification
+          git fetch origin site-release:site-release || true
+          if git show-ref --verify --quiet refs/heads/site-release; then
+            git worktree add /tmp/gspot-release site-release
+            find /tmp/gspot-release -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          else
+            git worktree add --detach /tmp/gspot-release
+            cd /tmp/gspot-release
+            git checkout --orphan site-release
+            git rm -rf .
+            cd "$GITHUB_WORKSPACE"
+          fi
+          cp -a dist/. /tmp/gspot-release/
+          cd /tmp/gspot-release
+          git add -A
+          git diff --cached --quiet || git commit -m "Deploy verified preview from ${GITHUB_SHA::7}"
+          git push origin HEAD:site-release
+          # Once gh-pages exists, continue publishing with a regular fast-forward.
+          # No force pushes, no tokens embedded in files, and no permission changes.
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git push origin HEAD:gh-pages
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/pages/builds"
+          else
+            echo 'Verified preview is ready on site-release. Initial Pages branch activation is pending.' >> "$GITHUB_STEP_SUMMARY"
+          fi
