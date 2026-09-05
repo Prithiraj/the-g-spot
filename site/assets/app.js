@@ -19,7 +19,6 @@
     }
     triggers.forEach((trigger, index) => {
       trigger.addEventListener('click', event => {
-        // Preserve native open-in-new-tab behavior.
         if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
         event.preventDefault();
         previousFocus = trigger;
@@ -71,5 +70,7 @@
       }
     }, { rootMargin: '-18% 0px -55% 0px', threshold: 0 });
     links.forEach(link => { const section = document.querySelector(link.hash); if (section) observer.observe(section); });
+    const hero = document.querySelector('#top');
+    if (hero) observer.observe(hero);
   }
 })();
